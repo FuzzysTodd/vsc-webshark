@@ -1,0 +1,7 @@
+{
+  "defaultConfig": "chainlink",
+  "customConfig": {
+    "baseConfiguration": "default",
+    "dependencies": []
+  }
+}
