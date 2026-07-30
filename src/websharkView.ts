@@ -340,7 +340,7 @@ export class WebsharkView implements vscode.Disposable {
     lastChangeActive: Date | undefined;
     private _pendingResponses: ResponseData[] = [];
 
-    private _sharkd2: SharkdProcess; // we keep a 2nd for indexing in parallel...
+    private _sharkd2!: SharkdProcess; // we keep a 2nd for indexing in parallel... (initialized after first load)
     private _sharkd2Cbs: { id: number, startTime: number, req: any, cb: ((jsonObj: object) => void) }[] = [];
 
     // timer interval infos:
@@ -392,6 +392,10 @@ export class WebsharkView implements vscode.Disposable {
                                 console.log(`WebsharkView sharkd req ${reqId.id} took ${Date.now() - reqId.startTime}ms`);
                             } else {
                                 console.log(`WebsharkView sharkdCon got data for reqId=${reqId?.id} after ${Date.now() - (reqId ? reqId.startTime : 0)}ms, data=${JSON.stringify(jsonObj)}`);
+                                // Initialize sharkd2 after the first sharkd load completes (id=1)
+                                if (reqId && reqId.id === 1) {
+                                    this.initializeSharkd2();
+                                }
                             }
                         } while (jsonObjs.length > 0);
                     }
@@ -521,7 +525,22 @@ export class WebsharkView implements vscode.Disposable {
         const configColumnsWidths = <any>(vscode.workspace.getConfiguration().get("vsc-webshark.columnsWidths"));
         this.onConfigColumnsChange(configColumns, configColumnsWidths);
 
-        // start the 2nd sharkd process last:
+        // Note: sharkd2 process is now initialized after the first sharkd load completes
+        // to ensure proper ordering and avoid parallel loading issues.
+        // See initializeSharkd2() method.
+
+        activeViews.push(this);
+    }
+
+    /**
+     * Initialize the second sharkd process and load the file.
+     * This is called after the first sharkd process completes its load
+     * to ensure proper sequential ordering instead of parallel loading.
+     */
+    private initializeSharkd2() {
+        console.log('WebsharkView initializeSharkd2 called after first sharkd load completed');
+
+        // start the 2nd sharkd process:
         this._sharkd2 = new SharkdProcess(this._sharkd.sharkdPath);
         this._sharkd2._onDataFunction = (jsonObjs) => {
             for (let i = 0; i < jsonObjs.length; ++i) {
@@ -540,11 +559,10 @@ export class WebsharkView implements vscode.Disposable {
                 }
             }
         };
-        // load the file here as well: todo might delay until the first one has fully loaded the file
-        // but with all our multi-core cpus it should run fine in parallel... todo
-        // as long as sharkd2 is not ready it's not granted that requests are done in fifo order.
 
-        this.sharkd2Request({ req: 'load', file: uri.fsPath }, (res: any) => {
+        // Load the file in sharkd2 - this now happens sequentially after sharkd completes,
+        // ensuring proper FIFO order and avoiding parallel loading issues.
+        this.sharkd2Request({ req: 'load', file: this.uri.fsPath }, (res: any) => {
             console.log(`WebsharkView sharkd2 'load file' got res=${JSON.stringify(res)}`);
             if ('error' in res) {
                 console.error(`WebsharkView sharkd2 'load file' got error=${res.error}`);
@@ -606,7 +624,6 @@ export class WebsharkView implements vscode.Disposable {
                 }
             });
         });
-        activeViews.push(this);
     }
 
     dispose() {
